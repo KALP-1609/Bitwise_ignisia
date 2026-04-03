@@ -1,16 +1,60 @@
-# Byte-compiled / optimized / DLL files
+
+# Python & Byte-compiled
+
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Virtual Environments
-ig_venv/
+
+# Node & Build Outputs
+
+node_modules/
+dist/
+dist-ssr/
+
+
+# Environments & Secrets
+
 venv/
+.venv/
+ig_venv/
 env/
 .env
+*.local
 
-# Datasets and Temp ML Folders
+
+# Datasets & ML Folders
+
 data/
-temp_*/.DS_Store
+temp_*/
+
+
+# Logs
+
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+
+# IDE & Editor Files
+
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+# OS Specific
+
+.DS_Store
 **/.DS_Store
+Thumbs.db

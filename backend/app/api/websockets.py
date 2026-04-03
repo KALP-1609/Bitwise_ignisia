@@ -45,7 +45,7 @@ async def process_stream(websocket: WebSocket):
                 
                 # Check whether this counts as an official scan
                 is_official_scan = False
-                if is_stationary and session_mgr.can_scan():
+                if is_stationary:
                     is_official_scan = True
                     session_mgr.update_stats(is_defective)
                     logger.info(f"📊 [AUTO-TRIGGER] Scanned. Defective: {is_defective} | Conf: {confidence:.2f}")

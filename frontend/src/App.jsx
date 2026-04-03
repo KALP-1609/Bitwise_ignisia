@@ -34,6 +34,7 @@ export default function App() {
   // App States
   const [verdictStatus, setVerdictStatus] = useState('idle'); // 'idle', 'pass', 'fail'
   const [calibrationImages, setCalibrationImages] = useState([]);
+  const [profileName, setProfileName] = useState('');
   const [heatmapOverlay, setHeatmapOverlay] = useState(null);
 
   const [liveStats, setLiveStats] = useState({
@@ -53,6 +54,7 @@ export default function App() {
   const wsRef = useRef(null);
   const captureIntervalRef = useRef(null);
   const isShiftActiveRef = useRef(true);
+  const verdictTimeoutRef = useRef(null);
 
   // Sync ref with state
   useEffect(() => {
@@ -142,23 +144,46 @@ export default function App() {
       try {
         const response = JSON.parse(event.data);
 
-        if (response.is_defective === true) {
-          // Failure Mode
-          setVerdictStatus('fail');
-          if (response.heatmap_base64) {
-            // Append standard base64 data wrapper if backend doesn't supply it
-            const mapSrc = response.heatmap_base64.startsWith('data:image')
+        // Map live heatmap dynamically over video regardless of scan state
+        if (response.is_defective && response.heatmap_base64) {
+             const mapSrc = response.heatmap_base64.startsWith('data:image')
               ? response.heatmap_base64
               : `data:image/jpeg;base64,${response.heatmap_base64}`;
-            setHeatmapOverlay(mapSrc);
+             setHeatmapOverlay(mapSrc);
+        } else if (!response.is_defective) {
+             setHeatmapOverlay(null);
+        }
+
+        // Update live stats & Trigger loud PASS/FAIL Box strictly when an object finishes settling
+        if (response.is_official_scan) {
+          setLiveStats(prev => {
+            const total = prev.total_scanned + 1;
+            const failed = response.is_defective ? prev.failed + 1 : prev.failed;
+            const passed = total - failed;
+            const defect_rate = (failed / total) * 100;
+            return {
+              ...prev,
+              total_scanned: total,
+              failed: failed,
+              passed: passed,
+              defect_rate: defect_rate
+            };
+          });
+
+          // Flash massive Verdict banner
+          if (response.is_defective) {
+            setVerdictStatus('fail');
+          } else {
+            setVerdictStatus('pass');
           }
-        } else if (response.is_defective === false) {
-          // Pass Mode
-          setVerdictStatus('pass');
-          setHeatmapOverlay(null); // Clear heatmap
-        } else {
-          setVerdictStatus('idle');
-          setHeatmapOverlay(null);
+
+          // Clear previous timeout if parts are swiped rapidly
+          if (verdictTimeoutRef.current) clearTimeout(verdictTimeoutRef.current);
+          
+          // Reset banner after 2.5 seconds
+          verdictTimeoutRef.current = setTimeout(() => {
+             setVerdictStatus('idle');
+          }, 2500);
         }
 
       } catch (e) {
@@ -195,25 +220,80 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleImageUpload = (e) => {
+  const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length + calibrationImages.length > 10) {
       alert('You can only upload up to 10 images');
       return;
     }
-    const newImages = files.map(f => URL.createObjectURL(f));
-    setCalibrationImages(prev => [...prev, ...newImages].slice(0, 10));
+    
+    // Convert files to base64
+    const fileToBase64 = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+
+    try {
+      const newImages = await Promise.all(files.map(fileToBase64));
+      setCalibrationImages(prev => [...prev, ...newImages].slice(0, 10));
+    } catch (err) {
+      console.error("Error reading files:", err);
+      alert("Failed to read image files.");
+    }
   };
 
-  const handleTrainModel = () => {
+  const handleTrainModel = async () => {
+    if (!profileName.trim()) {
+      alert("Please enter a product name first.");
+      return;
+    }
+    if (calibrationImages.length === 0) {
+      alert("Please upload or capture baseline images first.");
+      return;
+    }
     setIsTraining(true);
-    // Simulate AI model training processing delay
-    setTimeout(() => {
+    
+    try {
+      await api.calibrateModel({
+        name: profileName,
+        images_base64: calibrationImages
+      });
+      
       setIsTraining(false);
       setIsModalOpen(false); // Close calibration modal
       setCalibrationImages([]); // Reset images
+      setProfileName(''); // Reset profile name
       alert('Model successfully calibrated to the new baseline images!');
-    }, 2500);
+    } catch (error) {
+      console.error('Calibration failed:', error);
+      alert('Failed to calibrate model: ' + error.message);
+      setIsTraining(false);
+    }
+  };
+
+  const handleCaptureFromStream = () => {
+    if (calibrationImages.length >= 10) {
+      alert("Maximum 10 baseline images allowed.");
+      return;
+    }
+    
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        // Keep dimensions identical to live inference stream
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const base64Frame = canvas.toDataURL('image/jpeg', 0.8);
+        setCalibrationImages(prev => [...prev, base64Frame].slice(0, 10));
+      } else {
+        alert("Camera feed not ready.");
+      }
+    }
   };
 
   const handleEndShift = () => {
@@ -326,14 +406,30 @@ export default function App() {
               />
             )}
 
-            {/* Ghost Stencil - Fixed Responsive Size */}
-            <div className="relative w-[80%] h-[75%] max-w-[500px] max-h-[400px] border-2 border-dashed border-white/40 rounded-xl flex items-start justify-start p-4 transition-all duration-300 pointer-events-none z-10">
-              <span className="font-mono text-[10px] text-neutral-300 tracking-widest uppercase bg-neutral-950/80 backdrop-blur px-3 py-1.5 rounded-md shadow border border-white/10">
-                align product here
-              </span>
+            {/* Ghost Stencil - Resizable */}
+            <div 
+              className="relative border-2 border-dashed border-white/40 hover:border-white/80 rounded-xl flex flex-col justify-between p-4 z-10 group/stencil shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-colors duration-300"
+              style={{
+                width: '350px',
+                height: '250px',
+                minWidth: '150px',
+                minHeight: '150px',
+                resize: 'both',
+                overflow: 'hidden',
+                pointerEvents: 'auto'
+              }}
+            >
+              <div className="flex justify-start">
+                <span className="font-mono text-[10px] text-neutral-300 tracking-widest uppercase bg-neutral-950/80 backdrop-blur px-3 py-1.5 rounded-md shadow border border-white/10 select-none pointer-events-none transition-colors duration-300 group-hover/stencil:text-white group-hover/stencil:border-white/30">
+                  align product here
+                </span>
+              </div>
+              <div className="flex justify-end pointer-events-none opacity-0 group-hover/stencil:opacity-100 transition-opacity duration-300">
+                <span className="font-mono text-[9px] text-neutral-400 uppercase tracking-widest mb-1 mr-1 bg-neutral-950/60 px-2 py-1 rounded">
+                  drag to resize ↘
+                </span>
+              </div>
             </div>
-
-            {/* Hardware Selection & Indicators Overlay */}
             <div className="absolute top-6 left-6 flex items-center gap-3 z-20">
               <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse ring-4 ring-red-500/20"></div>
               <span className="font-mono text-xs text-white uppercase tracking-widest bg-neutral-950/70 backdrop-blur px-2.5 py-1 rounded shadow-sm border border-white/10">Live Stream</span>
@@ -387,7 +483,7 @@ export default function App() {
             <h2 className="font-mono text-[10px] uppercase text-neutral-500 tracking-widest mb-2">Active Profile</h2>
             <div className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-white/40"></div>
-              <p className="text-neutral-200 font-medium text-sm tracking-wide">alpha bracket v2</p>
+              <p className="text-neutral-200 font-medium text-sm tracking-wide">{liveStats.active_profile || 'No Profile Loaded'}</p>
             </div>
           </div>
 
@@ -436,24 +532,20 @@ export default function App() {
             <div className="grid grid-cols-2 gap-y-8 gap-x-4">
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">total items</p>
-                {/* REPLACED 142 */}
                 <div className="font-mono text-3xl text-neutral-200 font-light">{liveStats.total_scanned}</div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">yield rate</p>
-                {/* REPLACED 97.1% (Yield is 100 minus defect rate) */}
                 <div className="font-mono text-3xl text-neutral-200 font-light">
                   {liveStats.total_scanned === 0 ? "100.0" : (100 - liveStats.defect_rate).toFixed(1)}%
                 </div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">passed</p>
-                {/* REPLACED 138 */}
                 <div className="font-mono text-3xl text-emerald-500/90 font-light">{liveStats.passed}</div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">failed</p>
-                {/* REPLACED 4 */}
                 <div className="font-mono text-3xl text-rose-500/90 font-light">{liveStats.failed}</div>
               </div>
             </div>
@@ -562,6 +654,8 @@ export default function App() {
                 <input
                   type="text"
                   placeholder="e.g. beta enclosure v1"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
                   className="w-full bg-[#111111] border border-white/10 rounded-xl px-4 py-3.5 text-neutral-200 font-sans text-sm focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/30 transition-all placeholder:text-neutral-700"
                 />
               </div>
@@ -572,21 +666,32 @@ export default function App() {
                     Baseline Images (Max 10)
                   </label>
                   {calibrationImages.length > 0 && (
-                    <label className="cursor-pointer text-[10px] font-mono uppercase tracking-widest text-neutral-300 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-md transition-colors flex items-center gap-2">
-                      <UploadCloud size={14} />
-                      <span>Upload More</span>
-                      <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} />
-                    </label>
+                    <div className="flex gap-2">
+                      <label className="cursor-pointer text-[10px] font-mono uppercase tracking-widest text-neutral-300 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-md transition-colors flex items-center gap-2">
+                        <UploadCloud size={14} />
+                        <span>Upload</span>
+                        <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} />
+                      </label>
+                      <button onClick={handleCaptureFromStream} className="cursor-pointer text-[10px] font-mono uppercase tracking-widest text-blue-400 bg-blue-900/20 hover:bg-blue-900/40 px-3 py-1.5 rounded-md transition-colors flex items-center gap-2">
+                        <Camera size={14} />
+                        <span>Snap</span>
+                      </button>
+                    </div>
                   )}
                 </div>
 
                 {calibrationImages.length === 0 ? (
-                  <label className="w-full h-56 bg-[#111111] rounded-xl border border-white/5 flex flex-col items-center justify-center text-neutral-600 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors">
-                    <UploadCloud size={32} className="mb-4 opacity-40 group-hover:opacity-80 transition-opacity text-neutral-400" strokeWidth={1.5} />
-                    <span className="font-mono text-sm opacity-90 text-neutral-300 mb-1">Click to Upload Images</span>
-                    <span className="font-mono text-[10px] opacity-60">Upload up to 10 baseline frames</span>
-                    <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} />
-                  </label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <label className="h-56 bg-[#111111] rounded-xl border border-white/5 flex flex-col items-center justify-center text-neutral-600 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors">
+                      <UploadCloud size={32} className="mb-4 opacity-40 group-hover:opacity-80 transition-opacity text-neutral-400" strokeWidth={1.5} />
+                      <span className="font-mono text-[11px] opacity-90 text-neutral-300 mb-1">Upload Local</span>
+                      <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} />
+                    </label>
+                    <button onClick={handleCaptureFromStream} className="h-56 bg-blue-950/20 rounded-xl border border-blue-500/10 flex flex-col items-center justify-center text-blue-500 relative overflow-hidden group cursor-pointer hover:border-blue-500/30 hover:bg-blue-900/30 transition-colors">
+                      <Camera size={32} className="mb-4 opacity-40 group-hover:opacity-80 transition-opacity" />
+                      <span className="font-mono text-[11px] opacity-90 mb-1 text-center px-4">Snap From Webcam</span>
+                    </button>
+                  </div>
                 ) : (
                   <div className="w-full h-56 bg-[#111111] rounded-xl border border-white/5 p-4 overflow-y-auto grid grid-cols-3 gap-3 custom-scrollbar content-start">
                     {calibrationImages.map((src, i) => (
@@ -647,19 +752,21 @@ export default function App() {
             <div className="grid grid-cols-2 gap-6 mb-8 border-b border-white/10 pb-8">
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-1">Total Scanned</p>
-                <div className="font-mono text-3xl text-neutral-200">142</div>
+                <div className="font-mono text-3xl text-neutral-200">{liveStats.total_scanned}</div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-1">Final Yield</p>
-                <div className="font-mono text-3xl text-emerald-500/90">97.1%</div>
+                <div className="font-mono text-3xl text-emerald-500/90">
+                  {liveStats.total_scanned === 0 ? "100.0" : (100 - liveStats.defect_rate).toFixed(1)}%
+                </div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-1">Total Defects</p>
-                <div className="font-mono text-3xl text-rose-500/90">4</div>
+                <div className="font-mono text-3xl text-rose-500/90">{liveStats.failed}</div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-1">Top Offender</p>
-                <div className="font-mono text-xl text-amber-500/90 mt-2">Scratches</div>
+                <div className="font-mono text-xl text-amber-500/90 mt-2">{liveStats.failed > 0 ? "Detected Error" : "None"}</div>
               </div>
             </div>
 

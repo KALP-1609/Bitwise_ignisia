@@ -52,4 +52,5 @@ async def run_inference(frame_cv2: np.ndarray, profile_name: str) -> Tuple[bool,
     # ⚡ Run the heavy PyTorch prediction on a background thread
     is_defective, confidence, heatmap_cv2 = await asyncio.to_thread(ml_predict, frame_cv2, profile_name)
     
-    return is_defective, confidence, heatmap_cv2
+    # Cast to pure Python types so Pydantic serialization doesn't silently fail
+    return bool(is_defective), float(confidence), heatmap_cv2

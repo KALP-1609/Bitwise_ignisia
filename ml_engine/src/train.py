@@ -13,8 +13,15 @@ try:
 except ImportError:
     EXPORT_MODE = "torch"
 
+try:
+    from src.predict import flush_inferencer
+except ImportError:
+    flush_inferencer = lambda x: None
+
 def calibrate_model(image_list: list[np.ndarray], profile_name: str) -> bool:
     print(f"[ML] Starting calibration for profile: {profile_name}")
+    # Clear RAM cache so it loads the new weights
+    flush_inferencer(profile_name)
 
     # prep temp folder structure for anomalib's dataloader
     base_dir = os.path.abspath(f"./data/temp_{profile_name}")
@@ -26,13 +33,39 @@ def calibrate_model(image_list: list[np.ndarray], profile_name: str) -> bool:
     os.makedirs(abnormal_dir, exist_ok=True)
 
     try:
-        # dump clean images to disk
+        # dump clean images to disk and automatically augment them to build robust tolerance
+        # (If a user uploads perfect static images off google, the variance is 0 and any test normalizes to a 1.0 defect. Augmentation fixes this)
+        count = 0
         for idx, img in enumerate(image_list):
-            cv2.imwrite(os.path.join(normal_dir, f"sample_{idx}.jpg"), img)
+            # 1. Base Image
+            cv2.imwrite(os.path.join(normal_dir, f"sample_{count}.jpg"), img)
+            count += 1
+            
+            # 2. Bright Variance
+            bright = cv2.convertScaleAbs(img, alpha=1.1, beta=15)
+            cv2.imwrite(os.path.join(normal_dir, f"sample_{count}.jpg"), bright)
+            count += 1
+            
+            # 3. Dark Variance
+            dark = cv2.convertScaleAbs(img, alpha=0.9, beta=-15)
+            cv2.imwrite(os.path.join(normal_dir, f"sample_{count}.jpg"), dark)
+            count += 1
+            
+            # 4. Translation Variance (To simulate jitter/handling)
+            M = np.float32([[1, 0, 8], [0, 1, 8]])
+            shifted = cv2.warpAffine(img, M, (img.shape[1], img.shape[0]), borderMode=cv2.BORDER_REPLICATE)
+            cv2.imwrite(os.path.join(normal_dir, f"sample_{count}.jpg"), shifted)
+            count += 1
 
-        # add 4 dummy defect images to bypass lightning's 50/50 validation split bug
+        # Create a severely "defective" dummy image so Anomalib's MinMax normalization learns a wide scaling bound.
+        # (If the dummy is identical to normal images, max distance bound evaluates to 0.0, and any FP16 OpenVINO jitter normalizes to 1.0)
+        dummy_def = image_list[0].copy()
+        h, w = dummy_def.shape[:2]
+        cv2.rectangle(dummy_def, (w//4, h//4), (w - w//4, h - h//4), (0, 0, 0), -1)
+        
+        # add 4 dummy defect images to bypass lightning's validation split rules
         for i in range(4):
-            cv2.imwrite(os.path.join(abnormal_dir, f"dummy_defect_{i}.jpg"), image_list[0])
+            cv2.imwrite(os.path.join(abnormal_dir, f"dummy_defect_{i}.jpg"), dummy_def)
     except Exception as e:
         print(f"[ML] ERROR: Failed to write calibration images: {e}")
         return False

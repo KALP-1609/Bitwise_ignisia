@@ -36,6 +36,7 @@ export default function App() {
   const [calibrationImages, setCalibrationImages] = useState([]);
   const [profileName, setProfileName] = useState('');
   const [heatmapOverlay, setHeatmapOverlay] = useState(null);
+  const [userThreshold, setUserThreshold] = useState(0.95);
 
   const [liveStats, setLiveStats] = useState({
     total_scanned: 0,
@@ -44,15 +45,11 @@ export default function App() {
     defect_rate: 0
   });
 
-  // Hardware & Camera States
-  const [cameras, setCameras] = useState([]);
-  const [selectedCameraId, setSelectedCameraId] = useState('');
+  // Test Gallery States
+  const [testImages, setTestImages] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isInspecting, setIsInspecting] = useState(false);
 
-  // Refs for video capture loop
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const wsRef = useRef(null);
-  const captureIntervalRef = useRef(null);
   const isShiftActiveRef = useRef(true);
   const verdictTimeoutRef = useRef(null);
 
@@ -61,149 +58,105 @@ export default function App() {
     isShiftActiveRef.current = isShiftActive;
   }, [isShiftActive]);
 
-  // 1. Fetch available cameras on mount
-  useEffect(() => {
-    const getCameras = async () => {
-      try {
-        // Request immediate permissions to ensure labels aren't blank
-        await navigator.mediaDevices.getUserMedia({ video: true });
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        setCameras(videoDevices);
-        if (videoDevices.length > 0) {
-          setSelectedCameraId(videoDevices[0].deviceId); // Default to first available camera
-        }
-      } catch (err) {
-        console.error('Error accessing hardware webcams:', err);
+  // Handle uploading multiple test images
+  const handleTestImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    
+    // Convert files to base64
+    const fileToBase64 = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+
+    try {
+      const newImages = await Promise.all(files.map(fileToBase64));
+      
+      const newTestObjects = newImages.map(img => ({
+        original_base64: img,
+        heatmap_base64: null,
+        is_defective: null,
+        confidence: null,
+        status: 'pending' // pending, pass, fail
+      }));
+
+      setTestImages(prev => [...prev, ...newTestObjects]);
+      if (testImages.length === 0) setCurrentIndex(0); // Jump to first new image
+    } catch (err) {
+      console.error("Error reading files:", err);
+      alert("Failed to read image files.");
+    }
+  };
+
+  // Inspect the currently selected image
+  const runInspectionOnCurrent = async () => {
+    if (testImages.length === 0 || !testImages[currentIndex]) return;
+    
+    setIsInspecting(true);
+    const currentImg = testImages[currentIndex];
+
+    try {
+      const data = await api.inspectImage({
+        image_base64: currentImg.original_base64
+      });
+
+      // Update the specific image with inference metadata
+      setTestImages(prev => {
+        const copy = [...prev];
+        copy[currentIndex] = {
+          ...copy[currentIndex],
+          heatmap_base64: data.heatmap_base64,
+          is_defective: data.confidence > userThreshold,
+          confidence: data.confidence,
+          status: data.confidence > userThreshold ? 'fail' : 'pass'
+        };
+        return copy;
+      });
+
+      // Update overarching UI States
+      setVerdictStatus(data.confidence > userThreshold ? 'fail' : 'pass');
+      if (data.heatmap_base64) {
+        const mapSrc = data.heatmap_base64.startsWith('data:image')
+          ? data.heatmap_base64
+          : `data:image/jpeg;base64,${data.heatmap_base64}`;
+        setHeatmapOverlay(mapSrc);
+      } else {
+        setHeatmapOverlay(null);
       }
-    };
-    getCameras();
-  }, []);
 
-  // 2. Attach video stream whenever selected camera changes
+      // Fetch the updated latest stats from backend (since inspect natively increments them)
+      api.getSystemStats().then(stats => setLiveStats(stats)).catch(()=>{});
+
+    } catch (error) {
+      console.error("Inspection error:", error);
+      alert(error.message || "Failed to inspect image");
+    } finally {
+      setIsInspecting(false);
+    }
+  };
+
+  // When changing selected image, reset visual overlays
   useEffect(() => {
-    if (!selectedCameraId) return;
-
-    let stream = null;
-    const startStream = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: selectedCameraId } }
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch (err) {
-        console.error('Error starting video stream:', err);
-      }
-    };
-
-    startStream();
-
-    // Cleanup tracks on unmount / camera switch
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [selectedCameraId]);
-
-  // 3. Main WebSocket & Capture engine loop
-  useEffect(() => {
-    // Connect to backend
-    wsRef.current = new WebSocket(api.getStreamUrl());
-
-    wsRef.current.onopen = () => {
-      console.log('✅ WebSocket Connected to AI Backend API');
-
-      // Begin 300ms capture loop (roughly ~3 FPS) to prevent crashing the server
-      captureIntervalRef.current = setInterval(() => {
-        if (!isShiftActiveRef.current) return; // Halt capture if paused
-
-        if (videoRef.current && canvasRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const video = videoRef.current;
-          const canvas = canvasRef.current;
-          const context = canvas.getContext('2d', { willReadFrequently: true });
-
-          if (video.videoWidth > 0 && video.videoHeight > 0) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            // Extract Frame
-            const base64Frame = canvas.toDataURL('image/jpeg', 0.8);
-
-            // Transmit frame
-            wsRef.current.send(base64Frame);
-          }
-        }
-      }, 300);
-    };
-
-    wsRef.current.onmessage = (event) => {
-      try {
-        const response = JSON.parse(event.data);
-
-        // Map live heatmap dynamically over video regardless of scan state
-        if (response.is_defective && response.heatmap_base64) {
-             const mapSrc = response.heatmap_base64.startsWith('data:image')
-              ? response.heatmap_base64
-              : `data:image/jpeg;base64,${response.heatmap_base64}`;
-             setHeatmapOverlay(mapSrc);
-        } else if (!response.is_defective) {
-             setHeatmapOverlay(null);
-        }
-
-        // Update live stats & Trigger loud PASS/FAIL Box strictly when an object finishes settling
-        if (response.is_official_scan) {
-          setLiveStats(prev => {
-            const total = prev.total_scanned + 1;
-            const failed = response.is_defective ? prev.failed + 1 : prev.failed;
-            const passed = total - failed;
-            const defect_rate = (failed / total) * 100;
-            return {
-              ...prev,
-              total_scanned: total,
-              failed: failed,
-              passed: passed,
-              defect_rate: defect_rate
-            };
-          });
-
-          // Flash massive Verdict banner
-          if (response.is_defective) {
-            setVerdictStatus('fail');
+    if (testImages[currentIndex]) {
+       const imgData = testImages[currentIndex];
+       
+       if (imgData.status === 'pending') {
+          setVerdictStatus('idle');
+          setHeatmapOverlay(null);
+       } else {
+          setVerdictStatus(imgData.status);
+          if (imgData.heatmap_base64) {
+            const mapSrc = imgData.heatmap_base64.startsWith('data:image')
+              ? imgData.heatmap_base64
+              : `data:image/jpeg;base64,${imgData.heatmap_base64}`;
+            setHeatmapOverlay(mapSrc);
           } else {
-            setVerdictStatus('pass');
+            setHeatmapOverlay(null);
           }
-
-          // Clear previous timeout if parts are swiped rapidly
-          if (verdictTimeoutRef.current) clearTimeout(verdictTimeoutRef.current);
-          
-          // Reset banner after 2.5 seconds
-          verdictTimeoutRef.current = setTimeout(() => {
-             setVerdictStatus('idle');
-          }, 2500);
-        }
-
-      } catch (e) {
-        console.error('Failed to parse JSON response:', e);
-      }
-    };
-
-    wsRef.current.onerror = (error) => {
-      console.error('❌ WebSocket Connection Error', error);
-    };
-
-    wsRef.current.onclose = () => {
-      console.log('🔌 WebSocket disconnected');
-    };
-
-    return () => {
-      if (captureIntervalRef.current) clearInterval(captureIntervalRef.current);
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, []);
+       }
+    }
+  }, [currentIndex, testImages]);
   useEffect(() => {
     const fetchLiveStats = async () => {
       try {
@@ -222,10 +175,6 @@ export default function App() {
 
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files);
-    if (files.length + calibrationImages.length > 10) {
-      alert('You can only upload up to 10 images');
-      return;
-    }
     
     // Convert files to base64
     const fileToBase64 = (file) => new Promise((resolve, reject) => {
@@ -237,7 +186,7 @@ export default function App() {
 
     try {
       const newImages = await Promise.all(files.map(fileToBase64));
-      setCalibrationImages(prev => [...prev, ...newImages].slice(0, 10));
+      setCalibrationImages(prev => [...prev, ...newImages]);
     } catch (err) {
       console.error("Error reading files:", err);
       alert("Failed to read image files.");
@@ -375,80 +324,85 @@ export default function App() {
         {/* Left Column (Camera Feed & Defect Gallery) */}
         <section className="w-[70%] p-6 flex flex-col relative overflow-hidden">
           {/* Camera Feed Context */}
-          <div className="flex-1 bg-[#111111] rounded-xl relative overflow-hidden flex items-center justify-center border border-white/5 shadow-2xl mb-6 min-h-0 bg-neutral-900 group">
+          <div className="flex-1 bg-[#111111] rounded-xl relative overflow-hidden flex flex-col items-center justify-center border border-white/5 shadow-2xl mb-6 bg-neutral-900 group">
 
-            {/* The Live Video Element */}
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300 opacity-90"
-            />
+            {testImages.length === 0 ? (
+                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
+                  <UploadCloud size={48} className="mb-6 opacity-30 text-neutral-400" />
+                  <span className="font-mono text-lg opacity-90 text-neutral-300 mb-2">Upload Test Images</span>
+                  <span className="font-mono text-xs opacity-50 text-neutral-500">Supports batch upload.</span>
+                  <input type="file" multiple accept="image/*" className="hidden" onChange={handleTestImageUpload} />
+                </label>
+            ) : (
+               <div className="w-full h-full flex flex-col">
+                  {/* Image Viewer */}
+                  <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden p-8">
+                     {testImages[currentIndex] && (
+                        <div className="relative max-w-full max-h-full">
+                           {heatmapOverlay ? (
+                             <img
+                               src={heatmapOverlay}
+                               alt="Defect Heatmap"
+                               className="max-w-full max-h-full object-contain rounded-md"
+                             />
+                           ) : (
+                             <img 
+                               src={testImages[currentIndex].original_base64} 
+                               className="max-w-full max-h-full object-contain rounded-md" 
+                               alt="Test View" 
+                             />
+                           )}
+                        </div>
+                     )}
+                     
+                     {/* Overlay Navigation */}
+                     <div className="absolute inset-0 pointer-events-none flex items-center justify-between p-4">
+                        <button 
+                           onClick={(e) => { e.stopPropagation(); setCurrentIndex(Math.max(0, currentIndex - 1)); }}
+                           disabled={currentIndex === 0}
+                           className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-neutral-950/80 text-white disabled:opacity-20 hover:bg-neutral-800 transition-colors"
+                        >
+                           ←
+                        </button>
+                        <button 
+                           onClick={(e) => { e.stopPropagation(); setCurrentIndex(Math.min(testImages.length - 1, currentIndex + 1)); }}
+                           disabled={currentIndex === testImages.length - 1}
+                           className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-neutral-950/80 text-white disabled:opacity-20 hover:bg-neutral-800 transition-colors"
+                        >
+                           →
+                        </button>
+                     </div>
+                  </div>
 
-            {/* Paused Overlay */}
-            {!isShiftActive && (
-              <div className="absolute inset-0 bg-neutral-950/60 backdrop-blur-sm z-30 flex flex-col items-center justify-center transition-all duration-300 pointer-events-none">
-                <PauseCircle className="w-16 h-16 text-neutral-400 mb-4 opacity-70" strokeWidth={1.5} />
-                <h2 className="font-serif text-3xl text-neutral-300 lowercase tracking-widest">shift paused</h2>
-              </div>
+                  {/* Toolbar */}
+                  <div className="h-20 border-t border-white/10 bg-neutral-950 px-6 flex items-center justify-between shrink-0">
+                     <div className="flex items-center gap-4">
+                        <span className="font-mono text-xs text-neutral-400">
+                           Image {currentIndex + 1} of {testImages.length}
+                        </span>
+                        {testImages[currentIndex]?.status !== 'pending' && testImages[currentIndex]?.confidence != null && (
+                           <span className="font-mono text-xs px-2 py-1 bg-[#111] border border-white/10 rounded-md text-amber-500/90 shadow-inner">
+                              RAW SCORE: {testImages[currentIndex].confidence.toFixed(3)}
+                           </span>
+                        )}
+                     </div>
+                     
+                     <div className="flex gap-4">
+                        <label className="cursor-pointer px-4 py-2 border border-white/20 rounded text-neutral-300 font-mono text-[10px] uppercase tracking-widest hover:bg-white/5 transition-colors flex items-center">
+                           Upload More
+                           <input type="file" multiple accept="image/*" className="hidden" onChange={handleTestImageUpload} />
+                        </label>
+                        <button
+                           onClick={runInspectionOnCurrent}
+                           disabled={isInspecting || testImages[currentIndex]?.status !== 'pending'}
+                           className="px-6 py-2 bg-blue-600 disabled:opacity-50 hover:bg-blue-500 rounded text-white font-mono text-[10px] uppercase tracking-widest transition-colors shadow-lg shadow-blue-900/20"
+                        >
+                           {isInspecting ? 'Inspecting...' : (testImages[currentIndex]?.status !== 'pending' ? 'Already Inspected' : 'Run Inspection')}
+                        </button>
+                     </div>
+                  </div>
+               </div>
             )}
-
-            {/* Hidden Canvas used purely for logic scraping */}
-            <canvas ref={canvasRef} className="hidden" />
-
-            {/* Heatmap Overlay for Defective parts */}
-            {heatmapOverlay && (
-              <img
-                src={heatmapOverlay}
-                alt="Defect Heatmap"
-                className="absolute inset-0 w-full h-full object-cover opacity-60 mix-blend-screen pointer-events-none transition-opacity duration-300"
-              />
-            )}
-
-            {/* Ghost Stencil - Resizable */}
-            <div 
-              className="relative border-2 border-dashed border-white/40 hover:border-white/80 rounded-xl flex flex-col justify-between p-4 z-10 group/stencil shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-colors duration-300"
-              style={{
-                width: '350px',
-                height: '250px',
-                minWidth: '150px',
-                minHeight: '150px',
-                resize: 'both',
-                overflow: 'hidden',
-                pointerEvents: 'auto'
-              }}
-            >
-              <div className="flex justify-start">
-                <span className="font-mono text-[10px] text-neutral-300 tracking-widest uppercase bg-neutral-950/80 backdrop-blur px-3 py-1.5 rounded-md shadow border border-white/10 select-none pointer-events-none transition-colors duration-300 group-hover/stencil:text-white group-hover/stencil:border-white/30">
-                  align product here
-                </span>
-              </div>
-              <div className="flex justify-end pointer-events-none opacity-0 group-hover/stencil:opacity-100 transition-opacity duration-300">
-                <span className="font-mono text-[9px] text-neutral-400 uppercase tracking-widest mb-1 mr-1 bg-neutral-950/60 px-2 py-1 rounded">
-                  drag to resize ↘
-                </span>
-              </div>
-            </div>
-            <div className="absolute top-6 left-6 flex items-center gap-3 z-20">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse ring-4 ring-red-500/20"></div>
-              <span className="font-mono text-xs text-white uppercase tracking-widest bg-neutral-950/70 backdrop-blur px-2.5 py-1 rounded shadow-sm border border-white/10">Live Stream</span>
-            </div>
-
-            <div className="absolute top-6 right-6 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-              <select
-                className="bg-neutral-950/80 backdrop-blur-md border border-white/20 text-neutral-200 text-[10px] uppercase font-mono px-4 py-2 rounded-md outline-none cursor-pointer hover:border-white/40 hover:bg-neutral-900/90 transition-colors shadow-lg"
-                value={selectedCameraId}
-                onChange={(e) => setSelectedCameraId(e.target.value)}
-              >
-                {cameras.length === 0 && <option value="">Detecting Cameras...</option>}
-                {cameras.map(cam => (
-                  <option key={cam.deviceId} value={cam.deviceId}>
-                    {cam.label || `Camera Device ${cam.deviceId.substring(0, 4)}`}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {/* Defect Gallery (Audit Log) */}
@@ -489,6 +443,32 @@ export default function App() {
 
           {/* Verdict Box */}
           <div className="flex flex-col p-6 sm:p-8 border-b border-white/10 relative shrink-0 min-h-[300px]">
+            {/* Threshold Slider */}
+            <div className="absolute top-4 left-6 z-10 hidden sm:flex flex-col w-32 border border-white/10 p-2 rounded-md bg-[#0A0A0A]">
+              <div className="flex justify-between mb-1">
+                 <span className="text-[9px] font-mono uppercase text-neutral-500">Threshold</span>
+                 <span className="text-[9px] font-mono text-amber-500">{userThreshold.toFixed(2)}</span>
+              </div>
+              <input 
+                type="range" 
+                min="0.0" 
+                max="2.0" 
+                step="0.01" 
+                value={userThreshold} 
+                onChange={(e) => {
+                   const newT = parseFloat(e.target.value);
+                   setUserThreshold(newT);
+                   // Dynamically update active image verdict
+                   if (testImages[currentIndex] && testImages[currentIndex].status !== 'pending') {
+                       const conf = testImages[currentIndex].confidence;
+                       const newStat = conf > newT ? 'fail' : 'pass';
+                       setVerdictStatus(newStat);
+                   }
+                }}
+                className="w-full accent-amber-500 h-1 bg-white/10 rounded-full appearance-none outline-none"
+              />
+            </div>
+
             <div className="w-full flex justify-end gap-2 absolute top-6 right-8 z-10">
               {/* Toggles for Demo */}
               <button onClick={() => setVerdictStatus('idle')} className={`w-2 h-2 rounded-full transition-colors ${verdictStatus === 'idle' ? 'bg-neutral-400 ring-2 ring-white/20' : 'bg-neutral-800 hover:bg-neutral-600'}`} title="Idle"></button>
@@ -663,7 +643,7 @@ export default function App() {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <label className="block font-mono text-[10px] uppercase text-neutral-500 tracking-widest">
-                    Baseline Images (Max 10)
+                    Baseline Images (Any Amount)
                   </label>
                   {calibrationImages.length > 0 && (
                     <div className="flex gap-2">
@@ -672,25 +652,17 @@ export default function App() {
                         <span>Upload</span>
                         <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} />
                       </label>
-                      <button onClick={handleCaptureFromStream} className="cursor-pointer text-[10px] font-mono uppercase tracking-widest text-blue-400 bg-blue-900/20 hover:bg-blue-900/40 px-3 py-1.5 rounded-md transition-colors flex items-center gap-2">
-                        <Camera size={14} />
-                        <span>Snap</span>
-                      </button>
                     </div>
                   )}
                 </div>
 
                 {calibrationImages.length === 0 ? (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="w-full">
                     <label className="h-56 bg-[#111111] rounded-xl border border-white/5 flex flex-col items-center justify-center text-neutral-600 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors">
                       <UploadCloud size={32} className="mb-4 opacity-40 group-hover:opacity-80 transition-opacity text-neutral-400" strokeWidth={1.5} />
                       <span className="font-mono text-[11px] opacity-90 text-neutral-300 mb-1">Upload Local</span>
                       <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} />
                     </label>
-                    <button onClick={handleCaptureFromStream} className="h-56 bg-blue-950/20 rounded-xl border border-blue-500/10 flex flex-col items-center justify-center text-blue-500 relative overflow-hidden group cursor-pointer hover:border-blue-500/30 hover:bg-blue-900/30 transition-colors">
-                      <Camera size={32} className="mb-4 opacity-40 group-hover:opacity-80 transition-opacity" />
-                      <span className="font-mono text-[11px] opacity-90 mb-1 text-center px-4">Snap From Webcam</span>
-                    </button>
                   </div>
                 ) : (
                   <div className="w-full h-56 bg-[#111111] rounded-xl border border-white/5 p-4 overflow-y-auto grid grid-cols-3 gap-3 custom-scrollbar content-start">
@@ -715,7 +687,7 @@ export default function App() {
                   </div>
                 )}
                 {calibrationImages.length > 0 && (
-                  <p className="text-right font-mono text-[10px] text-neutral-500 mt-2">{calibrationImages.length} of 10 uploaded</p>
+                  <p className="text-right font-mono text-[10px] text-neutral-500 mt-2">{calibrationImages.length} uploaded</p>
                 )}
               </div>
 

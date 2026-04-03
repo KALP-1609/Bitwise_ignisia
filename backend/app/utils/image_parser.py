@@ -57,6 +57,18 @@ def cv2_to_base64(cv2_image_array: np.ndarray) -> str:
         ValueError: If the image cannot be encoded to jpeg.
     """
     try:
+        # If it's a OpenCV UMat (Transparent API/GPU), pull it cleanly back to CPU RAM as an ndarray
+        if hasattr(cv2_image_array, 'get'):
+            cv2_image_array = cv2_image_array.get()
+            
+        # Coerce any other potential alien types strictly into a 8-bit Numpy matrix
+        if not isinstance(cv2_image_array, np.ndarray):
+            cv2_image_array = np.array(cv2_image_array, dtype=np.uint8)
+        
+        # Ensure it is definitely 8-bit (uint8)
+        if cv2_image_array.dtype != np.uint8:
+            cv2_image_array = cv2_image_array.astype(np.uint8)
+
         # Encode image to JPEG
         success, buffer = cv2.imencode(".jpg", cv2_image_array)
         

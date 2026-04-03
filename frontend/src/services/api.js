@@ -33,5 +33,25 @@ export const api = {
     // Get the WebSocket URL for the live stream
     getStreamUrl: () => {
         return `${WS_URL}/ws/stream`;
+    },
+
+    // Single static image inspection
+    inspectImage: async (payload) => {
+        const response = await fetch(`${API_URL}/api/inspect/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            let backendMsg = response.statusText;
+            try {
+                const errData = await response.json();
+                backendMsg = errData.detail || backendMsg;
+            } catch (e) {}
+            throw new Error(`Inspection failed: ${backendMsg}`);
+        }
+        return response.json();
     }
 };

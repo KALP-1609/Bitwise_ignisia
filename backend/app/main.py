@@ -4,7 +4,7 @@ Main FastAPI application setup and routing.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import profiles, stats, websockets
+from app.api import profiles, stats, websockets, inspect
 
 app = FastAPI(
     title="Veritas-Q Edge Server",
@@ -32,6 +32,7 @@ app.add_middleware(
 app.include_router(profiles.router, prefix="/api/profiles", tags=["Profiles"])
 app.include_router(stats.router, prefix="/api/stats", tags=["Stats"])
 app.include_router(websockets.router, prefix="/ws", tags=["WebSocket"])
+app.include_router(inspect.router, prefix="/api/inspect", tags=["Inspect"])
 
 @app.get("/", tags=["Health"])
 async def root():

@@ -26,5 +26,6 @@ class WSDefectResponse(BaseModel):
     """
     status: str = Field(..., description="Status of the defect detection, e.g., 'completed' or 'error'")
     is_defective: bool = Field(..., description="True if a defect was detected, False otherwise")
+    confidence: float = Field(..., description="Confidence score of the prediction (0.0 to 1.0)")
     heatmap_base64: str = Field(..., description="Base64 encoded string of the resulting defect heatmap image")
     is_official_scan: bool = Field(..., description="Indicates whether this scan is part of the official record")

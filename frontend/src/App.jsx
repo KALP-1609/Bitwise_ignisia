@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Settings, X, Camera, CheckCircle2, AlertTriangle, Loader2, UploadCloud, ImageIcon, PauseCircle, PlayCircle, Power, Download } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts';
-
+import { api } from './services/api'; // Make sure the path matches where you put api.js
 const yieldData = [
   { time: '10:00', yield: 92 },
   { time: '10:10', yield: 94 },
@@ -35,6 +35,13 @@ export default function App() {
   const [verdictStatus, setVerdictStatus] = useState('idle'); // 'idle', 'pass', 'fail'
   const [calibrationImages, setCalibrationImages] = useState([]);
   const [heatmapOverlay, setHeatmapOverlay] = useState(null);
+
+  const [liveStats, setLiveStats] = useState({
+    total_scanned: 0,
+    passed: 0,
+    failed: 0,
+    defect_rate: 0
+  });
 
   // Hardware & Camera States
   const [cameras, setCameras] = useState([]);
@@ -102,7 +109,7 @@ export default function App() {
   // 3. Main WebSocket & Capture engine loop
   useEffect(() => {
     // Connect to backend
-    wsRef.current = new WebSocket('ws://10.23.40.96:8000/ws/stream');
+    wsRef.current = new WebSocket(api.getStreamUrl());
 
     wsRef.current.onopen = () => {
       console.log('✅ WebSocket Connected to AI Backend API');
@@ -172,6 +179,21 @@ export default function App() {
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
+  useEffect(() => {
+    const fetchLiveStats = async () => {
+      try {
+        const data = await api.getSystemStats();
+        setLiveStats(data);
+      } catch (err) {
+        // Silently fail if backend is restarting
+      }
+    };
+
+    // Fetch immediately on load, then every 2 seconds
+    fetchLiveStats();
+    const interval = setInterval(fetchLiveStats, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files);
@@ -212,6 +234,17 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const testConnection = async () => {
+    try {
+      const data = await api.getSystemStats();
+      console.log("🟢 BACKEND SAYS:", data);
+      alert("CONNECTION SECURED! 🚀 Check console.");
+    } catch (error) {
+      console.error("🔴 CONNECTION FAILED:", error);
+      alert("BACKEND IS GHOSTING US 👻 Check console.");
+    }
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col bg-neutral-950 text-neutral-400 font-sans overflow-hidden">
       {/* Top Navbar */}
@@ -220,6 +253,12 @@ export default function App() {
           defeX<span className="text-neutral-500">.</span>
         </h1>
         <div className="flex items-center gap-2 sm:gap-4">
+          <button
+            onClick={testConnection}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-blue-400 hover:text-blue-200 hover:bg-blue-500/10 rounded-md transition-colors duration-200 cursor-pointer border border-blue-500/20"
+          >
+            <span>ping backend 🔌</span>
+          </button>
           <button
             onClick={() => setIsShiftActive(!isShiftActive)}
             className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors duration-200 cursor-pointer ${isShiftActive
@@ -397,19 +436,25 @@ export default function App() {
             <div className="grid grid-cols-2 gap-y-8 gap-x-4">
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">total items</p>
-                <div className="font-mono text-3xl text-neutral-200 font-light">142</div>
+                {/* REPLACED 142 */}
+                <div className="font-mono text-3xl text-neutral-200 font-light">{liveStats.total_scanned}</div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">yield rate</p>
-                <div className="font-mono text-3xl text-neutral-200 font-light">97.1%</div>
+                {/* REPLACED 97.1% (Yield is 100 minus defect rate) */}
+                <div className="font-mono text-3xl text-neutral-200 font-light">
+                  {liveStats.total_scanned === 0 ? "100.0" : (100 - liveStats.defect_rate).toFixed(1)}%
+                </div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">passed</p>
-                <div className="font-mono text-3xl text-emerald-500/90 font-light">138</div>
+                {/* REPLACED 138 */}
+                <div className="font-mono text-3xl text-emerald-500/90 font-light">{liveStats.passed}</div>
               </div>
               <div>
                 <p className="text-neutral-500 text-[10px] uppercase tracking-widest mb-2">failed</p>
-                <div className="font-mono text-3xl text-rose-500/90 font-light">4</div>
+                {/* REPLACED 4 */}
+                <div className="font-mono text-3xl text-rose-500/90 font-light">{liveStats.failed}</div>
               </div>
             </div>
           </div>

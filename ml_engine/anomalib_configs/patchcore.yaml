@@ -1,0 +1,19 @@
+dataset:
+  name: hackathon_custom
+  format: folder
+  path: ./data/temp_calibration
+  normal_dir: normal
+  task: classification
+  image_size: [256, 256]
+
+model:
+  name: patchcore
+  backbone: wide_resnet50_2
+  pre_trained: true
+  coreset_sampling_ratio: 0.1
+  num_neighbors: 9
+
+metrics:
+  image:
+    - F1Score
+    - AUROC

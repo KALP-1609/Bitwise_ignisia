@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+ig_venv/
+venv/
+env/
+.env
+
+# Datasets and Temp ML Folders
+data/
+temp_*/.DS_Store
+**/.DS_Store

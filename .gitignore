@@ -28,6 +28,8 @@ env/
 
 data/
 temp_*/
+backend/app/ml_bridge/memory_banks/
+ml_engine/data/
 
 
 # Logs

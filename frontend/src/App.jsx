@@ -261,14 +261,19 @@ export default function App() {
   const exportCSV = () => {
     const headers = "Time,Defect Type,ID\n";
     const rows = recentDefects.map(d => `${d.time},${d.type},${d.id}`).join("\n");
-    const csvContent = "data:text/csv;charset=utf-8," + headers + rows;
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = headers + rows;
+    
+    // Create strong blob instead of fragile Data URI encoding
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `shift_report_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const testConnection = async () => {
@@ -603,50 +608,6 @@ export default function App() {
                     <Area type="monotone" dataKey="yield" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorYield)" />
                   </AreaChart>
                 </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Defect Categorization */}
-            <div>
-              <h2 className="font-mono text-[10px] uppercase text-neutral-500 tracking-widest mb-4">Defect Breakdown</h2>
-              <div className="flex items-center bg-[#111111] rounded-xl border border-white/5 p-4">
-                <div className="w-24 h-24 relative">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={defectData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={30}
-                        outerRadius={42}
-                        paddingAngle={5}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        {defectData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.fill} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                  {/* Center Text */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <span className="font-mono text-xs text-neutral-300">4</span>
-                  </div>
-                </div>
-
-                {/* Legend */}
-                <div className="ml-6 flex flex-col gap-3 flex-1">
-                  {defectData.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.fill }}></div>
-                        <span className="text-xs text-neutral-400 capitalize">{item.name}</span>
-                      </div>
-                      <span className="font-mono text-xs text-neutral-200">{item.value}%</span>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           </div>

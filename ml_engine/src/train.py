@@ -110,6 +110,8 @@ def calibrate_model(image_list: list[np.ndarray], profile_name: str) -> bool:
             engine.export(model=model, export_type=EXPORT_MODE)
 
         print("[ML] Export complete.")
+        # Ensure any inference requests that fired during training get evicted
+        flush_inferencer(profile_name) 
         return True
     except Exception as e:
         import traceback

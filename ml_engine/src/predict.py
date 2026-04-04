@@ -11,6 +11,17 @@ warnings.filterwarnings("ignore")
 # cache models in RAM so we don't fry the CPU reloading them every frame
 ACTIVE_INFERENCERS = {}
 
+ACCEPTED_VARIATIONS = {}
+
+def register_accepted_variation(cv2_image: np.ndarray, profile_name: str):
+    global ACCEPTED_VARIATIONS
+    if profile_name not in ACCEPTED_VARIATIONS:
+        ACCEPTED_VARIATIONS[profile_name] = []
+    
+    # Store resized to standard boundary to save RAM and ensure fast checks
+    resized = cv2.resize(cv2_image, (256, 256))
+    ACCEPTED_VARIATIONS[profile_name].append(cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY))
+
 def find_latest_model_file(base_dir: str, filename_or_ext: str) -> str:
     # anomalib creates new versions (version_0, version_1). We must find the latest one.
     if not os.path.exists(base_dir): return None
@@ -67,6 +78,19 @@ def run_inference(cv2_frame: np.ndarray, profile_name: str, dynamic_threshold: f
 
         # Print the raw score so the user can see the exact numerical distance of the evaluation
         print(f"[ML-EVAL] Raw Anomaly Score for {profile_name}: {raw_score}")
+
+        # Software Override checks
+        accepted_variations = ACCEPTED_VARIATIONS.get(profile_name, [])
+        if accepted_variations:
+            frame_gray = cv2.cvtColor(cv2.resize(cv2_frame, (256, 256)), cv2.COLOR_BGR2GRAY)
+            for var_gray in accepted_variations:
+                # Fast MSE compute
+                err = np.sum((frame_gray.astype("float") - var_gray.astype("float")) ** 2)
+                err /= float(frame_gray.shape[0] * frame_gray.shape[1])
+                if err < 50.0:  # Same image mathematically
+                    print(f"[ML-OVERRIDE] Matched accepted variation (MSE: {err}). Hard-lowering raw score.")
+                    raw_score = dynamic_threshold * 0.5  # Force pass dynamically below threshold
+                    break
 
         # Setting dynamic threshold based on user slider
         is_defective = raw_score > dynamic_threshold

@@ -15,7 +15,7 @@ if ML_DIR not in sys.path:
     sys.path.append(ML_DIR)
 
 from src.train import calibrate_model as ml_calibrate, adapt_memory_bank as ml_adapt
-from src.predict import run_inference as ml_predict
+from src.predict import run_inference as ml_predict, register_accepted_variation
 
 async def calibrate_model(images_cv2: List[np.ndarray], profile_name: str) -> bool:
     """
@@ -62,5 +62,9 @@ async def adapt_model(image_cv2: np.ndarray, profile_name: str) -> bool:
     Run on a background thread so the HTTP Request returns immediately.
     """
     print(f"🧠 [ML Bridge] Dispatching adaptation for '{profile_name}' to PyTorch...")
+    
+    # Software override: Instant memory validation mapping
+    register_accepted_variation(image_cv2, profile_name)
+    
     success = await asyncio.to_thread(ml_adapt, image_cv2, profile_name)
     return success

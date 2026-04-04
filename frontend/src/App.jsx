@@ -2,15 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Settings, X, Camera, CheckCircle2, AlertTriangle, Loader2, UploadCloud, ImageIcon, PauseCircle, PlayCircle, Power, Download } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { api } from './services/api'; // Make sure the path matches where you put api.js
-const yieldData = [
-  { time: '10:00', yield: 92 },
-  { time: '10:10', yield: 94 },
-  { time: '10:20', yield: 93 },
-  { time: '10:30', yield: 97 },
-  { time: '10:40', yield: 96 },
-  { time: '10:50', yield: 98 },
-  { time: '11:00', yield: 97.1 }
-];
 
 const defectData = [
   { name: 'Scratches', value: 45, fill: '#ef4444' }, // rose-500
@@ -18,12 +9,6 @@ const defectData = [
   { name: 'Dimensional', value: 25, fill: '#8b5cf6' }, // violet-500
 ];
 
-const recentDefects = [
-  { id: 'def-1', time: '13:42', type: 'Scratches', img: 'placeholder' },
-  { id: 'def-2', time: '13:15', type: 'Misalignment', img: 'placeholder' },
-  { id: 'def-3', time: '11:04', type: 'Dimensional', img: 'placeholder' },
-  { id: 'def-4', time: '09:21', type: 'Scratches', img: 'placeholder' },
-];
 
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -36,7 +21,7 @@ export default function App() {
   const [calibrationImages, setCalibrationImages] = useState([]);
   const [profileName, setProfileName] = useState('');
   const [heatmapOverlay, setHeatmapOverlay] = useState(null);
-  const [userThreshold, setUserThreshold] = useState(0.95);
+  const [userThreshold, setUserThreshold] = useState(40.0);
 
   const [liveStats, setLiveStats] = useState({
     total_scanned: 0,
@@ -44,6 +29,9 @@ export default function App() {
     failed: 0,
     defect_rate: 0
   });
+
+  const [recentDefects, setRecentDefects] = useState([]);
+  const [yieldTrend, setYieldTrend] = useState([{ time: '00:00', yield: 100.0 }]);
 
   // Test Gallery States
   const [testImages, setTestImages] = useState([]);
@@ -98,7 +86,8 @@ export default function App() {
 
     try {
       const data = await api.inspectImage({
-        image_base64: currentImg.original_base64
+        image_base64: currentImg.original_base64,
+        threshold: userThreshold
       });
 
       // Update the specific image with inference metadata
@@ -125,8 +114,19 @@ export default function App() {
         setHeatmapOverlay(null);
       }
 
+      if (data.confidence > userThreshold) {
+         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+         setRecentDefects(prev => [{ id: `def-${Date.now()}`, time: timeStr, type: data.product_drift ? 'Drift/Swap' : 'Defect', img: currentImg.original_base64 }, ...prev]);
+      }
+
       // Fetch the updated latest stats from backend (since inspect natively increments them)
       api.getSystemStats().then(stats => setLiveStats(stats)).catch(()=>{});
+
+      // TWIST 2: Detect Product Drift mid-shift
+      if (data.product_drift) {
+         alert("PRODUCT DRIFT DETECTED: The item structurally mismatches the active Profile reference batch.\\n\\nProduction Line sequence halted. Please supply a new Golden Reference calibration batch.");
+         setIsModalOpen(true);
+      }
 
     } catch (error) {
       console.error("Inspection error:", error);
@@ -162,6 +162,14 @@ export default function App() {
       try {
         const data = await api.getSystemStats();
         setLiveStats(data);
+        
+        // Dynamic Live Yield update
+        const currentYield = data.total_scanned === 0 ? 100.0 : +((100.0 - data.defect_rate).toFixed(1));
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setYieldTrend(prev => {
+           const newTrend = [...prev, { time: timeStr, yield: currentYield }];
+           return newTrend.slice(-20); // Keep last 20 frames
+        });
       } catch (err) {
         // Silently fail if backend is restarting
       }
@@ -326,7 +334,23 @@ export default function App() {
           {/* Camera Feed Context */}
           <div className="flex-1 bg-[#111111] rounded-xl relative overflow-hidden flex flex-col items-center justify-center border border-white/5 shadow-2xl mb-6 bg-neutral-900 group">
 
-            {testImages.length === 0 ? (
+            {!liveStats.active_profile ? (
+                <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-transparent">
+                  <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-6">
+                     <Settings size={28} className="text-neutral-400 opacity-80 animate-[spin_4s_linear_infinite]" />
+                  </div>
+                  <span className="font-mono text-xl opacity-90 text-neutral-200 mb-3 tracking-wide">Device Uncalibrated</span>
+                  <span className="font-mono text-xs opacity-60 text-neutral-400 max-w-sm leading-relaxed mb-8">
+                     To ensure measurement fidelity, the inspection module requires a Golden Reference baseline before processing external data.
+                  </span>
+                  <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="px-6 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 font-mono text-[10px] uppercase tracking-widest rounded-md transition-colors border border-blue-500/30"
+                  >
+                    Open Calibration Matrix
+                  </button>
+                </div>
+            ) : testImages.length === 0 ? (
                 <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
                   <UploadCloud size={48} className="mb-6 opacity-30 text-neutral-400" />
                   <span className="font-mono text-lg opacity-90 text-neutral-300 mb-2">Upload Test Images</span>
@@ -399,6 +423,30 @@ export default function App() {
                         >
                            {isInspecting ? 'Inspecting...' : (testImages[currentIndex]?.status !== 'pending' ? 'Already Inspected' : 'Run Inspection')}
                         </button>
+                        
+                        {/* TWIST 1 Button */}
+                        {testImages[currentIndex]?.status === 'fail' && (
+                           <button 
+                              onClick={async () => {
+                                 try {
+                                    await api.adaptModel({ image_base64: testImages[currentIndex].original_base64, threshold: userThreshold });
+                                    alert("Variation Accepted! The model is adapting in the background and will recognize this pattern automatically going forward.");
+                                    
+                                    const newImages = [...testImages];
+                                    newImages[currentIndex].status = 'pass';
+                                    newImages[currentIndex].heatmap_base64 = null;
+                                    setTestImages(newImages);
+                                    setVerdictStatus('pass');
+                                    setHeatmapOverlay(null);
+                                 } catch(e) {
+                                    alert("Failed to queue adaptation: " + e.message);
+                                 }
+                              }}
+                              className="px-6 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 border border-amber-500/50 rounded font-mono text-[10px] uppercase tracking-widest transition-colors shadow-lg"
+                           >
+                              Accept As Normal
+                           </button>
+                        )}
                      </div>
                   </div>
                </div>
@@ -415,9 +463,9 @@ export default function App() {
               {recentDefects.map((defect) => (
                 <div key={defect.id} className="min-w-[140px] h-24 bg-neutral-900 border border-rose-500/20 rounded-lg relative group cursor-pointer hover:border-rose-500/50 transition-colors">
                   <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/[0.05] to-transparent pointer-events-none"></div>
-                  {/* Placeholder for defect crop */}
-                  <div className="absolute top-2 left-2 right-2 bottom-8 border border-dashed border-rose-500/30 rounded flex items-center justify-center bg-rose-500/5 group-hover:bg-rose-500/10 transition-colors">
-                    <ImageIcon className="w-5 h-5 text-rose-500/40" />
+                  {/* Defect crop thumbnail */}
+                  <div className="absolute top-2 left-2 right-2 bottom-8 rounded overflow-hidden flex items-center justify-center bg-neutral-900 border border-white/5">
+                    <img src={defect.img} alt="Defect" className="w-full h-full object-cover" />
                   </div>
                   {/* Details */}
                   <div className="absolute bottom-2 left-2 right-2 flex justify-between items-center px-1">
@@ -452,8 +500,8 @@ export default function App() {
               <input 
                 type="range" 
                 min="0.0" 
-                max="2.0" 
-                step="0.01" 
+                max="150.0" 
+                step="0.5" 
                 value={userThreshold} 
                 onChange={(e) => {
                    const newT = parseFloat(e.target.value);
@@ -538,7 +586,7 @@ export default function App() {
               <h2 className="font-mono text-[10px] uppercase text-neutral-500 tracking-widest mb-4">Live Yield Trend (1hr)</h2>
               <div className="h-32 w-full bg-[#111111] rounded-xl border border-white/5 p-4 py-2">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={yieldData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                  <AreaChart data={yieldTrend} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorYield" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />

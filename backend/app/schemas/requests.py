@@ -20,3 +20,4 @@ class InspectionRequest(BaseModel):
     Schema for manually submitting a single image for testing against the currently active profile.
     """
     image_base64: str = Field(..., description="The testing image encoded as a base64 string")
+    threshold: float = Field(0.95, description="The custom user threshold for flagging defects")

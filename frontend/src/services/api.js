@@ -30,6 +30,21 @@ export const api = {
         return response.json();
     },
 
+    // Twist 1 POST request to adapt memory bank
+    adaptModel: async (payload) => {
+        const response = await fetch(`${API_URL}/api/profiles/adapt`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            throw new Error(`Adaptation failed: ${response.status} ${response.statusText}`);
+        }
+        return response.json();
+    },
+
     // Get the WebSocket URL for the live stream
     getStreamUrl: () => {
         return `${WS_URL}/ws/stream`;

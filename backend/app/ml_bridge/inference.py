@@ -14,8 +14,7 @@ ML_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../ml_en
 if ML_DIR not in sys.path:
     sys.path.append(ML_DIR)
 
-# --- 🧠 IMPORT THE ACTUAL ML FUNCTIONS ---
-from src.train import calibrate_model as ml_calibrate
+from src.train import calibrate_model as ml_calibrate, adapt_memory_bank as ml_adapt
 from src.predict import run_inference as ml_predict
 
 async def calibrate_model(images_cv2: List[np.ndarray], profile_name: str) -> bool:
@@ -35,22 +34,33 @@ async def calibrate_model(images_cv2: List[np.ndarray], profile_name: str) -> bo
     success = await asyncio.to_thread(ml_calibrate, images_cv2, profile_name)
     return success
 
-async def run_inference(frame_cv2: np.ndarray, profile_name: str) -> Tuple[bool, float, np.ndarray]:
+async def run_inference(frame_cv2: np.ndarray, profile_name: str, threshold: float = 0.95) -> Tuple[bool, float, np.ndarray, bool]:
     """
     Runs the live frame against the PatchCore model on a background thread.
     
     Args:
         frame_cv2 (np.ndarray): The camera frame to inspect.
         profile_name (str): The associated profile for inspection scoring.
+        threshold (float): The dynamically specified defect threshold.
         
     Returns:
-        Tuple[bool, float, np.ndarray]:
+        Tuple[bool, float, np.ndarray, bool]:
             - bool: Detection result (True if defective, False if pass).
             - float: Confidence score (0.0 to 1.0).
             - np.ndarray: The colorized heatmap overlay image.
+            - bool: product_drift boolean.
     """
     # ⚡ Run the heavy PyTorch prediction on a background thread
-    is_defective, confidence, heatmap_cv2 = await asyncio.to_thread(ml_predict, frame_cv2, profile_name)
+    is_defective, confidence, heatmap_cv2, drift = await asyncio.to_thread(ml_predict, frame_cv2, profile_name, threshold)
     
     # Cast to pure Python types so Pydantic serialization doesn't silently fail
-    return bool(is_defective), float(confidence), heatmap_cv2
+    return bool(is_defective), float(confidence), heatmap_cv2, bool(drift)
+
+async def adapt_model(image_cv2: np.ndarray, profile_name: str) -> bool:
+    """
+    Adapts the specified profile's memory bank using the new normal image.
+    Run on a background thread so the HTTP Request returns immediately.
+    """
+    print(f"🧠 [ML Bridge] Dispatching adaptation for '{profile_name}' to PyTorch...")
+    success = await asyncio.to_thread(ml_adapt, image_cv2, profile_name)
+    return success

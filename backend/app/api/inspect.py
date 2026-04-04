@@ -35,7 +35,7 @@ async def inspect_image(request: InspectionRequest):
 
     try:
         # 2. Run Inference
-        is_defective, confidence, heatmap_cv2 = await run_inference(frame_cv2, session_mgr.active_profile)
+        is_defective, confidence, heatmap_cv2, drift = await run_inference(frame_cv2, session_mgr.active_profile, request.threshold)
         
         # 3. Update Stats
         # Since this is a manual test, we always count it as an official scan
@@ -51,7 +51,8 @@ async def inspect_image(request: InspectionRequest):
             is_defective=is_defective,
             confidence=confidence,
             heatmap_base64=heatmap_base64,
-            is_official_scan=True
+            is_official_scan=True,
+            product_drift=drift
         )
 
     except Exception as e:

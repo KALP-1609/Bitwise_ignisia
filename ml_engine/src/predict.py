@@ -11,13 +11,22 @@ warnings.filterwarnings("ignore")
 # cache models in RAM so we don't fry the CPU reloading them every frame
 ACTIVE_INFERENCERS = {}
 
-def find_model_file(base_dir: str, filename_or_ext: str) -> str:
-    # anomalib likes to bury files in random subfolders, so we just recursively hunt for it
+def find_latest_model_file(base_dir: str, filename_or_ext: str) -> str:
+    # anomalib creates new versions (version_0, version_1). We must find the latest one.
     if not os.path.exists(base_dir): return None
+    candidates = []
     for root, _, files in os.walk(base_dir):
         for file in files:
-            if file.endswith(filename_or_ext): return os.path.join(root, file)
-    return None
+            if file.endswith(filename_or_ext): 
+                full_path = os.path.join(root, file)
+                candidates.append((full_path, os.path.getmtime(full_path)))
+    
+    if not candidates:
+        return None
+        
+    # Sort by modification time descending, return the newest one
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates[0][0]
 
 def flush_inferencer(profile_name: str):
     if profile_name in ACTIVE_INFERENCERS:
@@ -26,8 +35,8 @@ def flush_inferencer(profile_name: str):
 def load_inferencer(profile_name: str):
     if profile_name not in ACTIVE_INFERENCERS:
         base_dir = os.path.abspath(f"../backend/app/ml_bridge/memory_banks/{profile_name}")
-        openvino_path = find_model_file(base_dir, "model.xml")
-        torch_path = find_model_file(base_dir, "model.pt")
+        openvino_path = find_latest_model_file(base_dir, "model.xml")
+        torch_path = find_latest_model_file(base_dir, "model.pt")
 
         try:
             # prefer openvino for speed, fallback to torchscript
@@ -44,9 +53,9 @@ def load_inferencer(profile_name: str):
 
     return ACTIVE_INFERENCERS[profile_name]
 
-def run_inference(cv2_frame: np.ndarray, profile_name: str) -> tuple[bool, float, np.ndarray]:
+def run_inference(cv2_frame: np.ndarray, profile_name: str, dynamic_threshold: float = 0.95) -> tuple[bool, float, np.ndarray, bool]:
     inferencer = load_inferencer(profile_name)
-    if inferencer is None: return False, 0.0, cv2_frame
+    if inferencer is None: return False, 0.0, cv2_frame, False
 
     try:
         # OpenCV natively uses BGR. Anomalib's PyTorch Dataloader trains on RGB.
@@ -59,8 +68,13 @@ def run_inference(cv2_frame: np.ndarray, profile_name: str) -> tuple[bool, float
         # Print the raw score so the user can see the exact numerical distance of the evaluation
         print(f"[ML-EVAL] Raw Anomaly Score for {profile_name}: {raw_score}")
 
-        # Setting threshold to > 0.95 so 0.9 evaluates to Pass and 1.0 evaluates to Fail.
-        is_defective = raw_score > 0.95
+        # Setting dynamic threshold based on user slider
+        is_defective = raw_score > dynamic_threshold
+        
+        # Product Drift Detection (Twist 2)
+        # We determine a complete environmental/structural shift by making the drift boundary extremely strict.
+        # It must be vastly larger than the normal threshold (4x) OR exceed a hard ceiling of 100.
+        product_drift = raw_score > max(dynamic_threshold * 4.0, 100.0)
 
         # We will pass the RAW score directly out as confidence so the frontend can visibly see it for threshold calibration
         confidence = raw_score
@@ -85,8 +99,8 @@ def run_inference(cv2_frame: np.ndarray, profile_name: str) -> tuple[bool, float
              # Just in case it's completely malformed, fall back to returning cv2_frame safely
              heatmap_overlay = cv2_frame
 
-        return is_defective, float(confidence), heatmap_overlay
+        return is_defective, float(confidence), heatmap_overlay, product_drift
 
     except Exception as e:
         print(f"[ML] WARNING: Frame dropped: {e}")
-        return False, 0.0, cv2_frame
+        return False, 0.0, cv2_frame, False

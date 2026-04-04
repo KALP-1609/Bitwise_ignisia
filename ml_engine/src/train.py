@@ -116,3 +116,30 @@ def calibrate_model(image_list: list[np.ndarray], profile_name: str) -> bool:
         print("[ML] ERROR: Calibration failed with traceback:")
         traceback.print_exc()
         return False
+
+def adapt_memory_bank(new_image: np.ndarray, profile_name: str) -> bool:
+    """
+    Twist 1: Incrementally adapts the memory bank without dropping UI.
+    """
+    import glob
+    base_dir = os.path.abspath(f"./data/temp_{profile_name}/normal")
+    if not os.path.exists(base_dir):
+        return False
+        
+    try:
+        # Write new frame immediately to standard bounds
+        file_count = len(glob.glob(os.path.join(base_dir, "*.jpg")))
+        cv2.imwrite(os.path.join(base_dir, f"adapt_learned_{file_count}.jpg"), new_image)
+        
+        # Load all images (original + adapted) and recalibrate structurally
+        all_imgs = []
+        for file_path in glob.glob(os.path.join(base_dir, "*.jpg")):
+            loaded = cv2.imread(file_path)
+            if loaded is not None:
+                all_imgs.append(loaded)
+                
+        # Re-train
+        return calibrate_model(all_imgs, profile_name)
+    except Exception as e:
+        print(f"[ML-ADAPT] ERROR: Could not adapt model: {e}")
+        return False

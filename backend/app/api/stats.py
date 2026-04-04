@@ -18,5 +18,6 @@ async def get_stats():
         total_scanned=stats["total_scanned"],
         passed=stats["passed"],
         failed=stats["failed"],
-        defect_rate=stats["defect_rate"]
+        defect_rate=stats["defect_rate"],
+        active_profile=stats["active_profile"]
     )

@@ -49,7 +49,7 @@ export default function App() {
   // Handle uploading multiple test images
   const handleTestImageUpload = async (e) => {
     const files = Array.from(e.target.files);
-    
+
     // Convert files to base64
     const fileToBase64 = (file) => new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -60,7 +60,7 @@ export default function App() {
 
     try {
       const newImages = await Promise.all(files.map(fileToBase64));
-      
+
       const newTestObjects = newImages.map(img => ({
         original_base64: img,
         heatmap_base64: null,
@@ -80,7 +80,7 @@ export default function App() {
   // Inspect the currently selected image
   const runInspectionOnCurrent = async () => {
     if (testImages.length === 0 || !testImages[currentIndex]) return;
-    
+
     setIsInspecting(true);
     const currentImg = testImages[currentIndex];
 
@@ -115,17 +115,17 @@ export default function App() {
       }
 
       if (data.confidence > userThreshold) {
-         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-         setRecentDefects(prev => [{ id: `def-${Date.now()}`, time: timeStr, type: data.product_drift ? 'Drift/Swap' : 'Defect', img: currentImg.original_base64 }, ...prev]);
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setRecentDefects(prev => [{ id: `def-${Date.now()}`, time: timeStr, type: data.product_drift ? 'Drift/Swap' : 'Defect', img: currentImg.original_base64 }, ...prev]);
       }
 
       // Fetch the updated latest stats from backend (since inspect natively increments them)
-      api.getSystemStats().then(stats => setLiveStats(stats)).catch(()=>{});
+      api.getSystemStats().then(stats => setLiveStats(stats)).catch(() => { });
 
       // TWIST 2: Detect Product Drift mid-shift
       if (data.product_drift) {
-         alert("PRODUCT DRIFT DETECTED: The item structurally mismatches the active Profile reference batch.\\n\\nProduction Line sequence halted. Please supply a new Golden Reference calibration batch.");
-         setIsModalOpen(true);
+        alert("PRODUCT DRIFT DETECTED: The item structurally mismatches the active Profile reference batch.\\n\\nProduction Line sequence halted. Please supply a new Golden Reference calibration batch.");
+        setIsModalOpen(true);
       }
 
     } catch (error) {
@@ -139,22 +139,22 @@ export default function App() {
   // When changing selected image, reset visual overlays
   useEffect(() => {
     if (testImages[currentIndex]) {
-       const imgData = testImages[currentIndex];
-       
-       if (imgData.status === 'pending') {
-          setVerdictStatus('idle');
+      const imgData = testImages[currentIndex];
+
+      if (imgData.status === 'pending') {
+        setVerdictStatus('idle');
+        setHeatmapOverlay(null);
+      } else {
+        setVerdictStatus(imgData.status);
+        if (imgData.heatmap_base64) {
+          const mapSrc = imgData.heatmap_base64.startsWith('data:image')
+            ? imgData.heatmap_base64
+            : `data:image/jpeg;base64,${imgData.heatmap_base64}`;
+          setHeatmapOverlay(mapSrc);
+        } else {
           setHeatmapOverlay(null);
-       } else {
-          setVerdictStatus(imgData.status);
-          if (imgData.heatmap_base64) {
-            const mapSrc = imgData.heatmap_base64.startsWith('data:image')
-              ? imgData.heatmap_base64
-              : `data:image/jpeg;base64,${imgData.heatmap_base64}`;
-            setHeatmapOverlay(mapSrc);
-          } else {
-            setHeatmapOverlay(null);
-          }
-       }
+        }
+      }
     }
   }, [currentIndex, testImages]);
   useEffect(() => {
@@ -162,13 +162,13 @@ export default function App() {
       try {
         const data = await api.getSystemStats();
         setLiveStats(data);
-        
+
         // Dynamic Live Yield update
         const currentYield = data.total_scanned === 0 ? 100.0 : +((100.0 - data.defect_rate).toFixed(1));
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         setYieldTrend(prev => {
-           const newTrend = [...prev, { time: timeStr, yield: currentYield }];
-           return newTrend.slice(-20); // Keep last 20 frames
+          const newTrend = [...prev, { time: timeStr, yield: currentYield }];
+          return newTrend.slice(-20); // Keep last 20 frames
         });
       } catch (err) {
         // Silently fail if backend is restarting
@@ -183,7 +183,7 @@ export default function App() {
 
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files);
-    
+
     // Convert files to base64
     const fileToBase64 = (file) => new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -211,13 +211,13 @@ export default function App() {
       return;
     }
     setIsTraining(true);
-    
+
     try {
       await api.calibrateModel({
         name: profileName,
         images_base64: calibrationImages
       });
-      
+
       setIsTraining(false);
       setIsModalOpen(false); // Close calibration modal
       setCalibrationImages([]); // Reset images
@@ -235,7 +235,7 @@ export default function App() {
       alert("Maximum 10 baseline images allowed.");
       return;
     }
-    
+
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -262,11 +262,11 @@ export default function App() {
     const headers = "Time,Defect Type,ID\n";
     const rows = recentDefects.map(d => `${d.time},${d.type},${d.id}`).join("\n");
     const csvContent = headers + rows;
-    
+
     // Create strong blob instead of fragile Data URI encoding
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    
+
     const link = document.createElement("a");
     link.setAttribute("href", url);
     link.setAttribute("download", `shift_report_${new Date().toISOString().slice(0, 10)}.csv`);
@@ -340,121 +340,121 @@ export default function App() {
           <div className="flex-1 bg-[#111111] rounded-xl relative overflow-hidden flex flex-col items-center justify-center border border-white/5 shadow-2xl mb-6 bg-neutral-900 group">
 
             {!liveStats.active_profile ? (
-                <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-transparent">
-                  <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-6">
-                     <Settings size={28} className="text-neutral-400 opacity-80 animate-[spin_4s_linear_infinite]" />
-                  </div>
-                  <span className="font-mono text-xl opacity-90 text-neutral-200 mb-3 tracking-wide">Device Uncalibrated</span>
-                  <span className="font-mono text-xs opacity-60 text-neutral-400 max-w-sm leading-relaxed mb-8">
-                     To ensure measurement fidelity, the inspection module requires a Golden Reference baseline before processing external data.
-                  </span>
-                  <button
-                    onClick={() => setIsModalOpen(true)}
-                    className="px-6 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 font-mono text-[10px] uppercase tracking-widest rounded-md transition-colors border border-blue-500/30"
-                  >
-                    Open Calibration Matrix
-                  </button>
+              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-transparent">
+                <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-6">
+                  <Settings size={28} className="text-neutral-400 opacity-80 animate-[spin_4s_linear_infinite]" />
                 </div>
+                <span className="font-mono text-xl opacity-90 text-neutral-200 mb-3 tracking-wide">Device Uncalibrated</span>
+                <span className="font-mono text-xs opacity-60 text-neutral-400 max-w-sm leading-relaxed mb-8">
+                  To ensure measurement fidelity, the inspection module requires a Golden Reference baseline before processing external data.
+                </span>
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="px-6 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 font-mono text-[10px] uppercase tracking-widest rounded-md transition-colors border border-blue-500/30"
+                >
+                  Open Calibration Matrix
+                </button>
+              </div>
             ) : testImages.length === 0 ? (
-                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
-                  <UploadCloud size={48} className="mb-6 opacity-30 text-neutral-400" />
-                  <span className="font-mono text-lg opacity-90 text-neutral-300 mb-2">Upload Test Images</span>
-                  <span className="font-mono text-xs opacity-50 text-neutral-500">Supports batch upload.</span>
-                  <input type="file" multiple accept="image/*" className="hidden" onChange={handleTestImageUpload} />
-                </label>
+              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
+                <UploadCloud size={48} className="mb-6 opacity-30 text-neutral-400" />
+                <span className="font-mono text-lg opacity-90 text-neutral-300 mb-2">Upload Test Images</span>
+                <span className="font-mono text-xs opacity-50 text-neutral-500">Supports batch upload.</span>
+                <input type="file" multiple accept="image/*" className="hidden" onChange={handleTestImageUpload} />
+              </label>
             ) : (
-               <div className="w-full h-full flex flex-col">
-                  {/* Image Viewer */}
-                  <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden p-8">
-                     {testImages[currentIndex] && (
-                        <div className="relative max-w-full max-h-full">
-                           {heatmapOverlay ? (
-                             <img
-                               src={heatmapOverlay}
-                               alt="Defect Heatmap"
-                               className="max-w-full max-h-full object-contain rounded-md"
-                             />
-                           ) : (
-                             <img 
-                               src={testImages[currentIndex].original_base64} 
-                               className="max-w-full max-h-full object-contain rounded-md" 
-                               alt="Test View" 
-                             />
-                           )}
-                        </div>
-                     )}
-                     
-                     {/* Overlay Navigation */}
-                     <div className="absolute inset-0 pointer-events-none flex items-center justify-between p-4">
-                        <button 
-                           onClick={(e) => { e.stopPropagation(); setCurrentIndex(Math.max(0, currentIndex - 1)); }}
-                           disabled={currentIndex === 0}
-                           className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-neutral-950/80 text-white disabled:opacity-20 hover:bg-neutral-800 transition-colors"
-                        >
-                           ←
-                        </button>
-                        <button 
-                           onClick={(e) => { e.stopPropagation(); setCurrentIndex(Math.min(testImages.length - 1, currentIndex + 1)); }}
-                           disabled={currentIndex === testImages.length - 1}
-                           className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-neutral-950/80 text-white disabled:opacity-20 hover:bg-neutral-800 transition-colors"
-                        >
-                           →
-                        </button>
-                     </div>
+              <div className="w-full h-full flex flex-col">
+                {/* Image Viewer */}
+                <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden p-8">
+                  {testImages[currentIndex] && (
+                    <div className="relative max-w-full max-h-full">
+                      {heatmapOverlay ? (
+                        <img
+                          src={heatmapOverlay}
+                          alt="Defect Heatmap"
+                          className="max-w-full max-h-full object-contain rounded-md"
+                        />
+                      ) : (
+                        <img
+                          src={testImages[currentIndex].original_base64}
+                          className="max-w-full max-h-full object-contain rounded-md"
+                          alt="Test View"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Overlay Navigation */}
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-between p-4">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setCurrentIndex(Math.max(0, currentIndex - 1)); }}
+                      disabled={currentIndex === 0}
+                      className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-neutral-950/80 text-white disabled:opacity-20 hover:bg-neutral-800 transition-colors"
+                    >
+                      ←
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setCurrentIndex(Math.min(testImages.length - 1, currentIndex + 1)); }}
+                      disabled={currentIndex === testImages.length - 1}
+                      className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-neutral-950/80 text-white disabled:opacity-20 hover:bg-neutral-800 transition-colors"
+                    >
+                      →
+                    </button>
+                  </div>
+                </div>
+
+                {/* Toolbar */}
+                <div className="h-20 border-t border-white/10 bg-neutral-950 px-6 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-4">
+                    <span className="font-mono text-xs text-neutral-400">
+                      Image {currentIndex + 1} of {testImages.length}
+                    </span>
+                    {testImages[currentIndex]?.status !== 'pending' && testImages[currentIndex]?.confidence != null && (
+                      <span className="font-mono text-xs px-2 py-1 bg-[#111] border border-white/10 rounded-md text-amber-500/90 shadow-inner">
+                        RAW SCORE: {testImages[currentIndex].confidence.toFixed(3)}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Toolbar */}
-                  <div className="h-20 border-t border-white/10 bg-neutral-950 px-6 flex items-center justify-between shrink-0">
-                     <div className="flex items-center gap-4">
-                        <span className="font-mono text-xs text-neutral-400">
-                           Image {currentIndex + 1} of {testImages.length}
-                        </span>
-                        {testImages[currentIndex]?.status !== 'pending' && testImages[currentIndex]?.confidence != null && (
-                           <span className="font-mono text-xs px-2 py-1 bg-[#111] border border-white/10 rounded-md text-amber-500/90 shadow-inner">
-                              RAW SCORE: {testImages[currentIndex].confidence.toFixed(3)}
-                           </span>
-                        )}
-                     </div>
-                     
-                     <div className="flex gap-4">
-                        <label className="cursor-pointer px-4 py-2 border border-white/20 rounded text-neutral-300 font-mono text-[10px] uppercase tracking-widest hover:bg-white/5 transition-colors flex items-center">
-                           Upload More
-                           <input type="file" multiple accept="image/*" className="hidden" onChange={handleTestImageUpload} />
-                        </label>
-                        <button
-                           onClick={runInspectionOnCurrent}
-                           disabled={isInspecting || testImages[currentIndex]?.status !== 'pending'}
-                           className="px-6 py-2 bg-blue-600 disabled:opacity-50 hover:bg-blue-500 rounded text-white font-mono text-[10px] uppercase tracking-widest transition-colors shadow-lg shadow-blue-900/20"
-                        >
-                           {isInspecting ? 'Inspecting...' : (testImages[currentIndex]?.status !== 'pending' ? 'Already Inspected' : 'Run Inspection')}
-                        </button>
-                        
-                        {/* TWIST 1 Button */}
-                        {testImages[currentIndex]?.status === 'fail' && (
-                           <button 
-                              onClick={async () => {
-                                 try {
-                                    await api.adaptModel({ image_base64: testImages[currentIndex].original_base64, threshold: userThreshold });
-                                    alert("Variation Accepted! The model is adapting in the background and will recognize this pattern automatically going forward.");
-                                    
-                                    const newImages = [...testImages];
-                                    newImages[currentIndex].status = 'pass';
-                                    newImages[currentIndex].heatmap_base64 = null;
-                                    setTestImages(newImages);
-                                    setVerdictStatus('pass');
-                                    setHeatmapOverlay(null);
-                                 } catch(e) {
-                                    alert("Failed to queue adaptation: " + e.message);
-                                 }
-                              }}
-                              className="px-6 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 border border-amber-500/50 rounded font-mono text-[10px] uppercase tracking-widest transition-colors shadow-lg"
-                           >
-                              Accept As Normal
-                           </button>
-                        )}
-                     </div>
+                  <div className="flex gap-4">
+                    <label className="cursor-pointer px-4 py-2 border border-white/20 rounded text-neutral-300 font-mono text-[10px] uppercase tracking-widest hover:bg-white/5 transition-colors flex items-center">
+                      Upload More
+                      <input type="file" multiple accept="image/*" className="hidden" onChange={handleTestImageUpload} />
+                    </label>
+                    <button
+                      onClick={runInspectionOnCurrent}
+                      disabled={isInspecting || testImages[currentIndex]?.status !== 'pending'}
+                      className="px-6 py-2 bg-blue-600 disabled:opacity-50 hover:bg-blue-500 rounded text-white font-mono text-[10px] uppercase tracking-widest transition-colors shadow-lg shadow-blue-900/20"
+                    >
+                      {isInspecting ? 'Inspecting...' : (testImages[currentIndex]?.status !== 'pending' ? 'Already Inspected' : 'Run Inspection')}
+                    </button>
+
+                    {/* TWIST 1 Button */}
+                    {testImages[currentIndex]?.status === 'fail' && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.adaptModel({ image_base64: testImages[currentIndex].original_base64, threshold: userThreshold });
+                            alert("Variation Accepted! The model is adapting in the background and will recognize this pattern automatically going forward.");
+
+                            const newImages = [...testImages];
+                            newImages[currentIndex].status = 'pass';
+                            newImages[currentIndex].heatmap_base64 = null;
+                            setTestImages(newImages);
+                            setVerdictStatus('pass');
+                            setHeatmapOverlay(null);
+                          } catch (e) {
+                            alert("Failed to queue adaptation: " + e.message);
+                          }
+                        }}
+                        className="px-6 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 border border-amber-500/50 rounded font-mono text-[10px] uppercase tracking-widest transition-colors shadow-lg"
+                      >
+                        Accept As Normal
+                      </button>
+                    )}
                   </div>
-               </div>
+                </div>
+              </div>
             )}
           </div>
 
@@ -462,7 +462,7 @@ export default function App() {
           <div className="shrink-0 h-44 border border-white/5 rounded-xl bg-[#111111] p-5 flex flex-col relative overflow-hidden">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-mono text-[10px] uppercase text-neutral-500 tracking-widest">Defect Gallery (Live Log)</h2>
-              <span className="font-mono text-[10px] text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded-full">4 New</span>
+              <span className="font-mono text-[10px] text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded-full"></span>
             </div>
             <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
               {recentDefects.map((defect) => (
@@ -499,24 +499,24 @@ export default function App() {
             {/* Threshold Slider */}
             <div className="absolute top-4 left-6 z-10 hidden sm:flex flex-col w-32 border border-white/10 p-2 rounded-md bg-[#0A0A0A]">
               <div className="flex justify-between mb-1">
-                 <span className="text-[9px] font-mono uppercase text-neutral-500">Threshold</span>
-                 <span className="text-[9px] font-mono text-amber-500">{userThreshold.toFixed(2)}</span>
+                <span className="text-[9px] font-mono uppercase text-neutral-500">Threshold</span>
+                <span className="text-[9px] font-mono text-amber-500">{userThreshold.toFixed(2)}</span>
               </div>
-              <input 
-                type="range" 
-                min="0.0" 
-                max="150.0" 
-                step="0.5" 
-                value={userThreshold} 
+              <input
+                type="range"
+                min="0.0"
+                max="150.0"
+                step="0.5"
+                value={userThreshold}
                 onChange={(e) => {
-                   const newT = parseFloat(e.target.value);
-                   setUserThreshold(newT);
-                   // Dynamically update active image verdict
-                   if (testImages[currentIndex] && testImages[currentIndex].status !== 'pending') {
-                       const conf = testImages[currentIndex].confidence;
-                       const newStat = conf > newT ? 'fail' : 'pass';
-                       setVerdictStatus(newStat);
-                   }
+                  const newT = parseFloat(e.target.value);
+                  setUserThreshold(newT);
+                  // Dynamically update active image verdict
+                  if (testImages[currentIndex] && testImages[currentIndex].status !== 'pending') {
+                    const conf = testImages[currentIndex].confidence;
+                    const newStat = conf > newT ? 'fail' : 'pass';
+                    setVerdictStatus(newStat);
+                  }
                 }}
                 className="w-full accent-amber-500 h-1 bg-white/10 rounded-full appearance-none outline-none"
               />
@@ -707,8 +707,8 @@ export default function App() {
                   className="w-full flex items-center justify-center gap-2 bg-white text-neutral-950 font-medium tracking-wide py-4.5 rounded-xl hover:bg-neutral-200 transition-colors shadow-[0_0_20px_rgba(255,255,255,0.05)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isTraining && <Loader2 size={18} className="animate-spin text-neutral-600" />}
-                  {isTraining 
-                    ? 'calibrating model...' 
+                  {isTraining
+                    ? 'calibrating model...'
                     : (calibrationImages.length > 0 ? `train with ${calibrationImages.length} images` : 'upload images to train')
                   }
                 </button>

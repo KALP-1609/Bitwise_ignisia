@@ -30,7 +30,7 @@ This repository contains the finalized, production-ready codebase (merged from `
 ### Installation
 Clone the repository:
 ```bash
-git clone https://github.com/your-username/veritas-q-edge.git
+git clone https://github.com/KALP-1609/Bitwise_ignisia.git
 cd Bitwise_ignisia
 ```
 

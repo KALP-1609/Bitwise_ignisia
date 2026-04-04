@@ -87,6 +87,11 @@ npm run dev
 
 The application will be accessible via browser at `http://localhost:5173`.
 
+### Running an Inspection
+1. **Calibration:** Upon opening the frontend, click **Open Calibration Matrix**. You must upload the **ideal, defect-free baseline images** (these are located in your local `Data images` folder) to establish the structural "Golden Reference".
+2. **Train the Model:** Click **Train** and wait briefly for the engine to compile the baseline memory bank.
+3. **Inspection:** Once calibrated, upload the **defective test images** to the inspection timeline. Click **Run Inspection** to evaluate each image against the ideal baseline and view the generated anomaly heatmaps and yield scores!
+
 ## 🤖 ML Engine Note
 The `ml_engine` directory is a highly dedicated module handling the project's data science, PatchCore modeling configurations, and OpenVINO runtime requirements. Ensure that any updates to the machine learning stack are rigorously isolated to `ml_engine` and reflected strictly in `ml_engine/requirements.txt` to avoid crippling version or multiprocessing conflicts with the FastAPI main application thread.
 
